@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Check-In System</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f5f2; --card:#ffffff; --ink:#1a1a1a; --ink-soft:#6b6b6b;
+    --line:#e7e5e0; --accent:#3d5a80; --accent-ink:#ffffff;
+    --good:#2f6b3c; --good-bg:#e8f3ea; --bad:#a3342a; --bad-bg:#fbe9e7;
+    --warn:#8a6d1f; --warn-bg:#fbf3d9;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); min-height:100vh; padding:24px 16px;
+  }
+  .wrap{max-width:760px; margin:0 auto;}
+  h1{font-size:1.4rem; margin:0 0 4px;}
+  .sub{color:var(--ink-soft); font-size:0.92rem; margin-bottom:20px;}
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px; margin-bottom:16px;
+  }
+  .row{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+  .between{justify-content:space-between;}
+  button{
+    font:inherit; cursor:pointer; border:none; border-radius:10px; padding:10px 16px;
+    background:var(--accent); color:var(--accent-ink); font-weight:600; transition:opacity .15s;
+  }
+  button:hover{opacity:.88;}
+  button.secondary{background:var(--line); color:var(--ink);}
+  button.danger{background:var(--bad); color:#fff;}
+  button:disabled{opacity:.5; cursor:not-allowed;}
+  input[type=text], input[type=password], textarea{
+    font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:10px;
+    width:100%; background:#fdfdfc;
+  }
+  textarea{min-height:110px; resize:vertical;}
+  .status-pill{
+    display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px;
+    font-size:0.78rem; font-weight:700;
+  }
+  .pill-good{background:var(--good-bg); color:var(--good);}
+  .pill-bad{background:var(--bad-bg); color:var(--bad);}
+  .pill-warn{background:var(--warn-bg); color:var(--warn);}
+  .toggle{
+    display:flex; align-items:center; gap:10px; cursor:pointer; user-select:none;
+  }
+  .switch{
+    width:46px; height:26px; border-radius:999px; background:var(--bad-bg); position:relative;
+    transition:background .15s; flex-shrink:0;
+  }
+  .switch.on{background:var(--good);}
+  .switch::after{
+    content:''; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%;
+    background:#fff; transition:left .15s; box-shadow:0 1px 2px rgba(0,0,0,.3);
+  }
+  .switch.on::after{left:23px;}
+  table{width:100%; border-collapse:collapse; margin-top:8px;}
+  th, td{text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); font-size:0.9rem;}
+  th{color:var(--ink-soft); font-weight:600; font-size:0.78rem; text-transform:uppercase; letter-spacing:.03em;}
+  .name-cell{font-weight:600;}
+  .actions-cell{white-space:nowrap;}
+  .actions-cell button{padding:6px 10px; font-size:0.82rem; margin-right:4px;}
+  .empty{color:var(--ink-soft); text-align:center; padding:24px; font-size:0.9rem;}
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center;
+    justify-content:center; z-index:50; padding:20px;
+  }
+  .modal{
+    background:#fff; border-radius:var(--radius); padding:24px; max-width:340px; width:100%;
+    text-align:center;
+  }
+  .modal h3{margin-top:0;}
+  #qr-render{display:flex; justify-content:center; margin:14px 0;}
+  .link-box{
+    display:flex; gap:8px; align-items:center; margin-top:10px;
+  }
+  .link-box input{font-size:0.78rem; color:var(--ink-soft);}
+  .big-icon{font-size:2.6rem; margin-bottom:6px;}
+  .guest-name{font-size:1.3rem; font-weight:700; margin:2px 0 14px;}
+  .center{text-align:center;}
+  .stat-row{display:flex; gap:12px; margin-bottom:4px;}
+  .stat{
+    flex:1; background:#fdfdfc; border:1px solid var(--line); border-radius:10px; padding:12px;
+    text-align:center;
+  }
+  .stat .num{font-size:1.5rem; font-weight:700;}
+  .stat .lbl{font-size:0.75rem; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.03em;}
+  .hint{font-size:0.8rem; color:var(--ink-soft); margin-top:6px;}
+  .search-input{max-width:260px;}
+  .foot-note{font-size:0.78rem; color:var(--ink-soft); text-align:center; margin-top:18px; line-height:1.5;}
+  a.plain{color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+const app = document.getElementById('app');
+const params = new URLSearchParams(window.location.search);
+const tokenParam = params.get('token');
+const baseUrl = window.location.origin + window.location.pathname;
+
+// ---------- storage helpers (Netlify Function + Netlify Blobs) ----------
+const STORAGE_ENDPOINT = '/.netlify/functions/storage';
+
+async function getJSON(key){
+  try{
+    const res = await fetch(`${STORAGE_ENDPOINT}?key=${encodeURIComponent(key)}`);
+    if(res.status === 404) return null;
+    if(!res.ok) return null;
+    const data = await res.json();
+    return data.value ? JSON.parse(data.value) : null;
+  }catch(e){ console.error('storage get failed', e); return null; }
+}
+async function setJSON(key, value){
+  try{
+    const res = await fetch(STORAGE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value: JSON.stringify(value) })
+    });
+    return res.ok;
+  }catch(e){ console.error('storage set failed', e); return false; }
+}
+
+async function getSettings(){
+  const s = await getJSON('settings', true);
+  return s || { open:false, adminPin:null };
+}
+async function getIndex(){
+  const idx = await getJSON('guest-index', true);
+  return idx || { tokens:[], names:[] };
+}
+function findTokenByName(idxObj, name){
+  const lower = name.trim().toLowerCase();
+  const i = idxObj.names.findIndex(n => n.toLowerCase() === lower);
+  return i >= 0 ? idxObj.tokens[i] : null;
+}
+function parseSheetPaste(raw){
+  const lines = raw.split('\n').map(l => l.replace(/\r$/,'')).filter(l => l.trim().length > 0);
+  const rows = [];
+  for(const line of lines){
+    let cols = line.split('\t');
+    if(cols.length < 2) cols = line.split(',');
+    const name = (cols[0] || '').trim();
+    const phone = (cols[1] || '').trim();
+    const friendsRaw = (cols[2] || '').trim();
+    if(!name) continue;
+    if(/^name/i.test(name) && /surname/i.test(name)) continue; // skip header row
+    const friends = friendsRaw
+      ? friendsRaw.split(/[,;/]|\band\b/i).map(f => f.trim()).filter(Boolean)
+      : [];
+    rows.push({ name, phone, friends });
+  }
+  return rows;
+}
+async function getGuest(token){
+  return await getJSON('guest:'+token, true);
+}
+function genToken(){
+  return Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-4);
+}
+function fmtTime(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ================= GUEST CHECK-IN VIEW =================
+async function renderGuestView(token){
+  app.innerHTML = `<div class="card center"><p>Loading your check-in…</p></div>`;
+  const [guest, settings] = await Promise.all([getGuest(token), getSettings()]);
+
+  if(!guest){
+    app.innerHTML = `
+      <div class="card center">
+        <div class="big-icon">🔗</div>
+        <h1>Invalid link</h1>
+        <p class="sub">This check-in link doesn't match anyone on the guest list. Double check the link, or contact the organizer.</p>
+      </div>`;
+    return;
+  }
+
+  if(guest.checkedIn){
+    app.innerHTML = `
+      <div class="card center">
+        <div class="big-icon">✅</div>
+        <p class="guest-name">${escapeHtml(guest.name)}</p>
+        <span class="status-pill pill-good">Already checked in</span>
+        <p class="sub" style="margin-top:14px;">Checked in at ${fmtTime(guest.checkinTime)}.<br>This link has already been used and can't be used again.</p>
+      </div>`;
+    return;
+  }
+
+  if(!settings.open){
+    app.innerHTML = `
+      <div class="card center">
+        <div class="big-icon">⏳</div>
+        <p class="guest-name">${escapeHtml(guest.name)}</p>
+        <span class="status-pill pill-warn">Check-in not open yet</span>
+        <p class="sub" style="margin-top:14px;">The organizer hasn't opened check-in yet. Try this link again shortly — you don't need to do anything else.</p>
+      </div>`;
+    return;
+  }
+
+  app.innerHTML = `
+    <div class="card center">
+      <div class="big-icon">👋</div>
+      <p class="guest-name">${escapeHtml(guest.name)}</p>
+      <p class="sub">Tap below to check in. This link only works once.</p>
+      <button id="checkin-btn" style="padding:14px 28px; font-size:1rem;">Check In</button>
+    </div>`;
+
+  document.getElementById('checkin-btn').onclick = async () => {
+    const btn = document.getElementById('checkin-btn');
+    btn.disabled = true; btn.textContent = 'Checking in…';
+    // re-fetch latest state to avoid double check-in races
+    const latest = await getGuest(token);
+    if(!latest){
+      renderGuestView(token); return;
+    }
+    if(latest.checkedIn){
+      renderGuestView(token); return;
+    }
+    const settingsNow = await getSettings();
+    if(!settingsNow.open){
+      renderGuestView(token); return;
+    }
+    latest.checkedIn = true;
+    latest.checkinTime = new Date().toISOString();
+    await setJSON('guest:'+token, latest, true);
+    renderGuestView(token);
+  };
+}
+
+// ================= ADMIN VIEW =================
+let adminUnlocked = false;
+
+async function renderAdminGate(){
+  const settings = await getSettings();
+
+  if(!settings.adminPin){
+    app.innerHTML = `
+      <div class="card">
+        <h1>Set up your check-in system</h1>
+        <p class="sub">Choose a PIN. You'll enter this each time you open the admin dashboard on this or any device. It's a light gate, not real security — don't use anything sensitive.</p>
+        <input type="password" id="new-pin" placeholder="Choose a PIN (min 4 characters)">
+        <div style="margin-top:12px;"><button id="set-pin-btn">Set PIN &amp; continue</button></div>
+      </div>`;
+    document.getElementById('set-pin-btn').onclick = async () => {
+      const pin = document.getElementById('new-pin').value.trim();
+      if(pin.length < 4){ alert('PIN must be at least 4 characters.'); return; }
+      settings.adminPin = pin;
+      await setJSON('settings', settings, true);
+      adminUnlocked = true;
+      renderAdminDashboard();
+    };
+    return;
+  }
+
+  app.innerHTML = `
+    <div class="card">
+      <h1>Admin login</h1>
+      <p class="sub">Enter your PIN to manage check-in.</p>
+      <input type="password" id="pin-input" placeholder="PIN">
+      <div style="margin-top:12px;"><button id="pin-btn">Unlock</button></div>
+      <p class="hint" id="pin-err" style="color:var(--bad);"></p>
+    </div>`;
+  document.getElementById('pin-btn').onclick = () => {
+    const val = document.getElementById('pin-input').value;
+    if(val === settings.adminPin){
+      adminUnlocked = true;
+      renderAdminDashboard();
+    } else {
+      document.getElementById('pin-err').textContent = 'Incorrect PIN.';
+    }
+  };
+  document.getElementById('pin-input').addEventListener('keydown', e => {
+    if(e.key === 'Enter') document.getElementById('pin-btn').click();
+  });
+}
+
+let searchQuery = '';
+
+async function renderAdminDashboard(){
+  const [settings, index] = await Promise.all([getSettings(), getIndex()]);
+  const guests = await Promise.all(index.tokens.map(t => getGuest(t)));
+  const validGuests = guests.filter(Boolean);
+  const checkedInCount = validGuests.filter(g => g.checkedIn).length;
+
+  const filtered = validGuests
+    .filter(g => g.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a,b) => a.name.localeCompare(b.name));
+
+  app.innerHTML = `
+    <h1>Check-In Dashboard</h1>
+    <p class="sub">Manage your guest list, open or close check-in, and share each guest's unique link.</p>
+
+    <div class="card">
+      <div class="row between">
+        <div class="toggle" id="open-toggle">
+          <div class="switch ${settings.open ? 'on' : ''}" id="switch-el"></div>
+          <div>
+            <div style="font-weight:700;">${settings.open ? 'Check-in is OPEN' : 'Check-in is CLOSED'}</div>
+            <div class="hint">${settings.open ? 'Guests can use their links right now.' : 'Guest links will show "not open yet" until you turn this on.'}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat"><div class="num">${validGuests.length}</div><div class="lbl">Total guests</div></div>
+      <div class="stat"><div class="num">${checkedInCount}</div><div class="lbl">Checked in</div></div>
+      <div class="stat"><div class="num">${validGuests.length - checkedInCount}</div><div class="lbl">Not yet</div></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Add guests</h3>
+      <p class="hint" style="margin-top:-6px; margin-bottom:8px;">
+        Select your columns in Google Sheets (Name and Surname, Whatsapp Number, Name of friend(s)) and copy — then paste directly below. Each row becomes a primary guest plus one separate entry per friend named in that row, each with their own link. Duplicate names (case-insensitive) are skipped automatically, and a header row is detected and ignored.
+      </p>
+      <textarea id="guest-paste" placeholder="Jane Smith    082 555 1234    Thabo Nkosi, Amy Lee&#10;John Doe    071 222 9876    Sipho Dlamini"></textarea>
+      <div style="margin-top:10px;"><button id="add-guests-btn">Add to list</button> <span class="hint" id="add-result"></span></div>
+    </div>
+
+    <div class="card">
+      <div class="row between" style="margin-bottom:8px;">
+        <h3 style="margin:0;">Guest list</h3>
+        <input class="search-input" type="text" id="search-input" placeholder="Search by name..." value="${escapeHtml(searchQuery)}">
+      </div>
+      ${filtered.length === 0 ? `<div class="empty">No guests yet. Paste names above to get started.</div>` : `
+      <table>
+        <thead><tr><th>Name</th><th>Group</th><th>Status</th><th>Link</th></tr></thead>
+        <tbody>
+          ${filtered.map(g => `
+            <tr>
+              <td class="name-cell">${escapeHtml(g.name)}</td>
+              <td>${g.role === 'friend'
+                  ? `Guest of ${escapeHtml(g.partyName || '')}`
+                  : `Host${g.phone ? ` · <span class="hint">${escapeHtml(g.phone)}</span>` : ''}`}</td>
+              <td>${g.checkedIn
+                  ? `<span class="status-pill pill-good">Checked in</span><br><span class="hint">${fmtTime(g.checkinTime)}</span>`
+                  : `<span class="status-pill pill-bad">Not checked in</span>`}</td>
+              <td class="actions-cell">
+                <button class="secondary" data-qr="${g.token}">QR / Link</button>
+                ${g.checkedIn ? `<button class="danger" data-reset="${g.token}">Reset</button>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    </div>
+
+    <div class="card">
+      <button class="secondary" id="export-btn">Export list as CSV</button>
+    </div>
+
+    <p class="foot-note">
+      Links only work once each — after a guest checks in, their link/QR is spent and cannot be reused.<br>
+      Share this dashboard's links only with the specific guest they belong to.
+    </p>
+  `;
+
+  // toggle open/close
+  document.getElementById('open-toggle').onclick = async () => {
+    settings.open = !settings.open;
+    await setJSON('settings', settings, true);
+    renderAdminDashboard();
+  };
+
+  // search
+  const searchInput = document.getElementById('search-input');
+  searchInput.oninput = (e) => { searchQuery = e.target.value; renderAdminDashboard(); };
+  // restore focus/cursor after re-render
+  searchInput.focus();
+  searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
+
+  // add guests
+  document.getElementById('add-guests-btn').onclick = async () => {
+    const raw = document.getElementById('guest-paste').value;
+    const rows = parseSheetPaste(raw);
+    if(rows.length === 0) return;
+
+    const idx = await getIndex();
+    let added = 0, skipped = 0;
+
+    async function addPerson(name, role, partyId, partyName, phone){
+      let token = genToken();
+      while(idx.tokens.includes(token)) token = genToken();
+      const record = {
+        name, token, role, phone: phone || null,
+        partyId: partyId || token, partyName: partyName || name,
+        checkedIn:false, checkinTime:null, addedAt:new Date().toISOString()
+      };
+      await setJSON('guest:'+token, record, true);
+      idx.tokens.push(token);
+      idx.names.push(name);
+      added++;
+      return record;
+    }
+
+    for(const row of rows){
+      let primaryToken = findTokenByName(idx, row.name);
+      if(primaryToken){
+        skipped++;
+      } else {
+        const primary = await addPerson(row.name, 'primary', null, null, row.phone);
+        primaryToken = primary.token;
+      }
+      for(const friendName of row.friends){
+        if(findTokenByName(idx, friendName)){ skipped++; continue; }
+        await addPerson(friendName, 'friend', primaryToken, row.name, null);
+      }
+    }
+
+    await setJSON('guest-index', idx, true);
+    document.getElementById('add-result').textContent = `Added ${added}${skipped ? `, skipped ${skipped} duplicate(s)` : ''}.`;
+    document.getElementById('guest-paste').value = '';
+    renderAdminDashboard();
+  };
+
+  // QR / link buttons
+  document.querySelectorAll('[data-qr]').forEach(btn => {
+    btn.onclick = () => showQrModal(btn.getAttribute('data-qr'), validGuests.find(g => g.token === btn.getAttribute('data-qr')));
+  });
+
+  // reset buttons
+  document.querySelectorAll('[data-reset]').forEach(btn => {
+    btn.onclick = async () => {
+      const token = btn.getAttribute('data-reset');
+      const g = await getGuest(token);
+      if(!g) return;
+      if(!confirm(`Reset check-in status for ${g.name}? Their link will become usable again.`)) return;
+      g.checkedIn = false; g.checkinTime = null;
+      await setJSON('guest:'+token, g, true);
+      renderAdminDashboard();
+    };
+  });
+
+  // export CSV
+  document.getElementById('export-btn').onclick = () => {
+    const rows = [['Name','Role','Host / With','Phone','Status','Checked In At','Link']];
+    validGuests.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(g => {
+      rows.push([
+        g.name,
+        g.role === 'friend' ? 'Friend' : 'Host',
+        g.role === 'friend' ? (g.partyName || '') : '',
+        g.phone || '',
+        g.checkedIn ? 'Checked in' : 'Not checked in',
+        g.checkinTime ? fmtTime(g.checkinTime) : '',
+        `${baseUrl}?token=${g.token}`
+      ]);
+    });
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'guest-checkin-list.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+}
+
+function showQrModal(token, guest){
+  const link = `${baseUrl}?token=${token}`;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <h3>${escapeHtml(guest ? guest.name : '')}</h3>
+      <div id="qr-render"></div>
+      <div class="link-box">
+        <input type="text" readonly value="${link}" id="link-field">
+        <button class="secondary" id="copy-link-btn">Copy</button>
+      </div>
+      <div style="margin-top:14px;"><button class="secondary" id="close-modal-btn">Close</button></div>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  new QRCode(document.getElementById('qr-render'), {
+    text: link, width: 200, height: 200
+  });
+
+  document.getElementById('copy-link-btn').onclick = () => {
+    const field = document.getElementById('link-field');
+    field.select();
+    navigator.clipboard && navigator.clipboard.writeText(link).catch(()=>{});
+    document.getElementById('copy-link-btn').textContent = 'Copied!';
+    setTimeout(() => { document.getElementById('copy-link-btn').textContent = 'Copy'; }, 1500);
+  };
+  document.getElementById('close-modal-btn').onclick = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if(e.target === backdrop) backdrop.remove(); });
+}
+
+// ================= ROUTER =================
+(async function init(){
+  if(tokenParam){
+    await renderGuestView(tokenParam);
+  } else {
+    await renderAdminGate();
+  }
+})();
+</script>
+</body>
+</html>

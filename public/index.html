@@ -386,9 +386,18 @@ async function renderAdminDashboard(){
 
   // add guests
   document.getElementById('add-guests-btn').onclick = async () => {
+    const resultEl = document.getElementById('add-result');
     const raw = document.getElementById('guest-paste').value;
+    if(!raw.trim()){
+      resultEl.textContent = 'Paste some guest rows into the box first.';
+      return;
+    }
     const rows = parseSheetPaste(raw);
-    if(rows.length === 0) return;
+    if(rows.length === 0){
+      resultEl.textContent = 'No valid rows found in that paste — make sure each row has a name in the first column.';
+      return;
+    }
+    resultEl.textContent = 'Adding…';
 
     const idx = await getIndex();
     let added = 0, skipped = 0;
@@ -422,7 +431,11 @@ async function renderAdminDashboard(){
       }
     }
 
-    await setJSON('guest-index', idx, true);
+    const ok = await setJSON('guest-index', idx, true);
+    if(!ok){
+      document.getElementById('add-result').textContent = 'Something went wrong saving to storage — check the browser console / Netlify function logs.';
+      return;
+    }
     document.getElementById('add-result').textContent = `Added ${added}${skipped ? `, skipped ${skipped} duplicate(s)` : ''}.`;
     document.getElementById('guest-paste').value = '';
     renderAdminDashboard();

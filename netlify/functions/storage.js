@@ -2,8 +2,9 @@
 // GET  /.netlify/functions/storage?key=foo        -> { key, value }
 // POST /.netlify/functions/storage  { key, value } -> { ok: true }
 //
-// Netlify automatically provides Blobs credentials to Functions when
-// deployed on Netlify — no manual setup or API keys needed.
+// Netlify usually auto-injects Blobs credentials into Functions, but some
+// setups need them supplied explicitly via BLOBS_SITE_ID / BLOBS_TOKEN
+// environment variables (Site configuration -> Environment variables).
 
 const { getStore } = require('@netlify/blobs');
 
@@ -13,14 +14,23 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type'
 };
 
+function getBlobStore() {
+  const opts = { name: 'checkin-system' };
+  if (process.env.BLOBS_SITE_ID && process.env.BLOBS_TOKEN) {
+    opts.siteID = process.env.BLOBS_SITE_ID;
+    opts.token = process.env.BLOBS_TOKEN;
+  }
+  return getStore(opts);
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: CORS_HEADERS, body: '' };
   }
 
-  const store = getStore('checkin-system');
-
   try {
+    const store = getBlobStore();
+
     if (event.httpMethod === 'GET') {
       const key = event.queryStringParameters && event.queryStringParameters.key;
       if (!key) {
@@ -49,6 +59,6 @@ exports.handler = async (event) => {
 
     return { statusCode: 405, headers: CORS_HEADERS, body: JSON.stringify({ error: 'method not allowed' }) };
   } catch (err) {
-    return { statusCode: 500, headers: CORS_HEADERS, body: JSON.stringify({ error: err.message }) };
+    return { statusCode: 500, headers: CORS_HEADERS, body: JSON.stringify({ error: err.message, type: err.name }) };
   }
 };
